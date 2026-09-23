@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>班级课程表 · 第1课氛围编程练习</title>
+<style>
+:root{--red:#94070a;--ink:#1f2329;--muted:#6b7280;--bg:#f7f5f2;--card:#fff}
+*{box-sizing:border-box}body{margin:0;font:15px/1.6 -apple-system,"Segoe UI","Noto Sans SC",sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--red);color:#fff;padding:22px 24px}header h1{margin:0;font-size:22px}header p{margin:4px 0 0;opacity:.85}
+main{max-width:920px;margin:24px auto;padding:0 16px;display:grid;gap:18px}
+.card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(31,35,41,.06)}
+form{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+input,select,button{font:inherit;padding:9px 10px;border:1px solid #d8dbe0;border-radius:8px;background:#fff}
+button{background:var(--red);color:#fff;border:0;cursor:pointer}button.ghost{background:#fff;color:var(--red);border:1px solid var(--red)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.filters button{background:#fff;color:var(--ink);border:1px solid #d8dbe0}.filters button.on{background:var(--red);color:#fff;border-color:var(--red)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #eef0f3}th{font-size:13px;color:var(--muted)}
+.empty{padding:28px;text-align:center;color:var(--muted)}@media(max-width:720px){form{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>班级课程表</h1>
+  <p>第 1 课氛围编程练习：凭简短描述生成，先跑起来，再对照规约补失败路径。</p>
+</header>
+<main>
+  <section class="card">
+    <h2 style="margin-top:0">添加课程</h2>
+    <form id="f">
+      <label>星期<select name="day"><option>周一</option><option>周二</option><option>周三</option><option>周四</option><option>周五</option></select></label>
+      <label>节次<select name="period"><option>第1-2节</option><option>第3-4节</option><option>第5-6节</option><option>第7-8节</option></select></label>
+      <label>科目<input name="subject" required maxlength="20" placeholder="数学"></label>
+      <label>教师<input name="teacher" required maxlength="20" placeholder="张老师"></label>
+      <label>&nbsp;<button type="submit">保存</button></label>
+    </form>
+    <p id="msg" style="margin:8px 0 0;color:var(--red);font-size:13px"></p>
+  </section>
+  <section class="card">
+    <div class="filters" id="filters">
+      <button data-day="全部" class="on">全部</button>
+      <button data-day="周一">周一</button><button data-day="周二">周二</button><button data-day="周三">周三</button>
+      <button data-day="周四">周四</button><button data-day="周五">周五</button>
+    </div>
+    <table><thead><tr><th>星期</th><th>节次</th><th>科目</th><th>教师</th><th></th></tr></thead><tbody id="tb"></tbody></table>
+    <div id="empty" class="empty" hidden>本星期暂无课程</div>
+  </section>
+</main>
+<script>
+const KEY='lesson01-timetable';
+const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||[]}catch{return[]}};
+const save=x=>localStorage.setItem(KEY,JSON.stringify(x));
+let rows=load(), day='全部';
+const tb=document.getElementById('tb'), empty=document.getElementById('empty'), msg=document.getElementById('msg');
+function render(){
+  tb.textContent='';
+  const view=rows.filter(r=>day==='全部'||r.day===day);
+  empty.hidden=view.length>0;
+  for(const r of view){
+    const tr=document.createElement('tr');
+    for(const v of [r.day,r.period,r.subject,r.teacher]){const td=document.createElement('td');td.textContent=v;tr.append(td);}
+    const td=document.createElement('td');const b=document.createElement('button');b.className='ghost';b.textContent='删除';
+    b.onclick=()=>{rows=rows.filter(x=>x.id!==r.id);save(rows);render();};td.append(b);tr.append(td);tb.append(tr);
+  }
+}
+document.getElementById('f').addEventListener('submit',e=>{
+  e.preventDefault();const f=new FormData(e.target);
+  const r={id:Date.now(),day:f.get('day'),period:f.get('period'),subject:f.get('subject').trim(),teacher:f.get('teacher').trim()};
+  if(rows.some(x=>x.day===r.day&&x.period===r.period)){msg.textContent='节次冲突：该时段已有课程，未保存。';return;}
+  msg.textContent='';rows.push(r);save(rows);render();e.target.reset();
+});
+document.getElementById('filters').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;day=b.dataset.day;
+  document.querySelectorAll('#filters button').forEach(x=>x.classList.toggle('on',x===b));render();
+});
+render();
+</script>
+</body>
+</html>
