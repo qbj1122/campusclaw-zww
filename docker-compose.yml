@@ -19,6 +19,12 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -27,12 +33,15 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: "3306"
+      QDRANT_URL: http://qdrant:6333
       UPLOAD_DIR: /data/uploads
     volumes:
       - upload-data:/data/uploads
     depends_on:
       db:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     expose:
       - "8080"
     restart: unless-stopped
@@ -50,4 +59,5 @@ services:
 
 volumes:
   db-data:
+  qdrant-data:
   upload-data:
