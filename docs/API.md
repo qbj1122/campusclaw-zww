@@ -35,14 +35,33 @@
 | 方法 | 路径 | 角色 | 说明 |
 |---|---|---|---|
 | GET/PUT | `/api/prompt` | 登录/教师 | `{prompt}`，班级默认提示词 |
+| GET | `/api/prompt-templates` | 教师 | `{items:[{id,name,description,content,variables:[],...}]}` |
+| GET | `/api/prompt-templates/{id}` | 教师 | 模板详情 |
+| POST | `/api/prompt-templates` | 教师 | `{name,description,content}` → 201；变量只允许 `class_name/agent_name/student_name/skill_name/subject/date/materials` |
+| PUT | `/api/prompt-templates/{id}` | 教师 | 同上 |
+| DELETE | `/api/prompt-templates/{id}` | 教师 | 204；引用该模板的智能体回退到 `prompt` |
+| GET | `/api/prompt-variables` | 教师 | `{items:[{name,description}]}` |
+| POST | `/api/prompt-templates/{id}/preview` | 教师 | `{content,rendered}`，用示例值渲染 |
 | GET | `/api/skills` | 登录 | `{items:[{id,name,trigger_text,description,tools:[],subject_text,enabled,source_text,...}]}` |
 | POST | `/api/skills` | 教师 | `{source_text}`；元数据空行 + 正文；工具仅允许 `knowledge_search` 或 `工具名@服务器名`，保存前校验服务器已连接且工具在发现清单 |
+| POST | `/api/skills/upload` | 教师 | multipart `file`（`.md/.txt`，≤64KB）→ 201 技能 |
+| PUT | `/api/skills/{id}/upload` | 教师 | multipart `file`，替换现有技能 |
 | PUT | `/api/skills/{id}` | 教师 | 同上 |
 | DELETE | `/api/skills/{id}` | 教师 | 204 |
 | GET | `/api/agents` | 登录 | 学生只见启用；`{items:[{id,name,prompt,enabled,skill_ids,material_ids,...}]}` |
 | GET | `/api/agents/{id}` | 登录 | 学生访问停用/他班 = 404 |
-| POST/PUT | `/api/agents[/{id}]` | 教师 | `{name,prompt,enabled,skill_ids,material_ids}`；班内名称唯一，绑定只接受本班 |
+| POST/PUT | `/api/agents[/{id}]` | 教师 | `{name,prompt,prompt_template_id,enabled,skill_ids,material_ids}`；班内名称唯一，绑定只接受本班；模板非空时按模板渲染，`prompt` 为回退 |
 | DELETE | `/api/agents/{id}` | 教师 | 204 |
+
+## AI 应用目录
+
+| 方法 | 路径 | 角色 | 说明 |
+|---|---|---|---|
+| GET | `/api/apps` | 登录 | 学生仅看已启用；`{items:[{id,name,description,category,icon,prompt_template_id,prompt_template_name,default_prompt,default_skill_ids,default_material_ids,enabled,agent_count,...}]}` |
+| GET | `/api/apps/{id}` | 登录 | 学生访问停用/他班 = 404 |
+| POST/PUT | `/api/apps[/{id}]` | 教师 | `{name,description,category,icon,prompt_template_id,default_prompt,skill_ids,material_ids,enabled}`；班内名称唯一 |
+| DELETE | `/api/apps/{id}` | 教师 | 204；已有智能体保留，仅解除 `app_id` 关联 |
+| POST | `/api/apps/{id}/instantiate` | 教师 | `{name?}` → 201 智能体；默认名 `<应用名>助手`，重名时需换名 |
 
 技能文件格式：
 

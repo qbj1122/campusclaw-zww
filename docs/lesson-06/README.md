@@ -137,7 +137,7 @@ POST /api/conversations/{id}/messages/stream
 $ python3 apitest/run_all.py
 ...
 ------------------------------------------------------------------------------
-35 passed, 0 failed, 35 total in 12.14s
+55 passed, 0 failed, 55 total in 21.71s
 HTML report: apitest/report.html
 ```
 

@@ -194,11 +194,12 @@ func (s *Server) getAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentInput struct {
-	Name        string  `json:"name"`
-	Prompt      string  `json:"prompt"`
-	Enabled     *bool   `json:"enabled"`
-	SkillIDs    []int64 `json:"skill_ids"`
-	MaterialIDs []int64 `json:"material_ids"`
+	Name             string  `json:"name"`
+	Prompt           string  `json:"prompt"`
+	PromptTemplateID *int64  `json:"prompt_template_id"`
+	Enabled          *bool   `json:"enabled"`
+	SkillIDs         []int64 `json:"skill_ids"`
+	MaterialIDs      []int64 `json:"material_ids"`
 }
 
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +223,9 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = id
+	if created, err := s.Store.Agent(r.Context(), user(r).ClassID, id); err == nil {
+		a = created
+	}
 	writeJSON(w, http.StatusCreated, a)
 }
 
@@ -247,6 +251,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = old.ID
+	a.AppID = old.AppID
 	if err := s.Store.UpdateAgent(r.Context(), a); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 			writeError(w, http.StatusBadRequest, "bad_request", "班内智能体名称必须唯一")
@@ -254,6 +259,9 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		s.fail(w, err)
 		return
+	}
+	if updated, err := s.Store.Agent(r.Context(), user(r).ClassID, a.ID); err == nil {
+		a = updated
 	}
 	writeJSON(w, http.StatusOK, a)
 }
@@ -301,9 +309,22 @@ func (s *Server) agentFromInput(ctx context.Context, classID int64, in agentInpu
 	if !ok {
 		return nil, fmt.Errorf("绑定了他班或不存在的材料")
 	}
+	if in.PromptTemplateID != nil && *in.PromptTemplateID > 0 {
+		ok, err := s.Store.PromptTemplateExists(ctx, classID, *in.PromptTemplateID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("提示词模板不存在或不属于本班")
+		}
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
-	return &model.Agent{ClassID: classID, Name: name, Prompt: in.Prompt, Enabled: enabled, SkillIDs: in.SkillIDs, MaterialIDs: in.MaterialIDs}, nil
+	templateID := in.PromptTemplateID
+	if templateID != nil && *templateID <= 0 {
+		templateID = nil
+	}
+	return &model.Agent{ClassID: classID, Name: name, Prompt: in.Prompt, PromptTemplateID: templateID, Enabled: enabled, SkillIDs: in.SkillIDs, MaterialIDs: in.MaterialIDs}, nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"time"
 
 	"github.com/qbj1122/campusclaw-zww/internal/model"
 )
@@ -110,12 +109,17 @@ func (s *Store) AgentSkills(ctx context.Context, agentID, classID int64) ([]mode
 	return out, rows.Err()
 }
 
+const agentSelect = `SELECT a.id,a.class_id,a.name,a.prompt,a.prompt_template_id,COALESCE(pt.name,''),
+	a.app_id,COALESCE(app.name,''),a.enabled,a.created_at,a.updated_at
+	FROM agents a LEFT JOIN prompt_templates pt ON pt.id=a.prompt_template_id
+	LEFT JOIN ai_apps app ON app.id=a.app_id `
+
 func (s *Store) ListAgents(ctx context.Context, classID int64, includeDisabled bool) ([]model.Agent, error) {
-	q := `SELECT id,class_id,name,prompt,enabled,created_at,updated_at FROM agents WHERE class_id=?`
+	q := agentSelect + `WHERE a.class_id=?`
 	if !includeDisabled {
-		q += ` AND enabled=1`
+		q += ` AND a.enabled=1`
 	}
-	q += ` ORDER BY id`
+	q += ` ORDER BY a.id`
 	rows, err := s.DB.QueryContext(ctx, q, classID)
 	if err != nil {
 		return nil, err
@@ -142,12 +146,13 @@ func (s *Store) ListAgents(ctx context.Context, classID int64, includeDisabled b
 
 func scanAgent(sc interface{ Scan(...any) error }) (model.Agent, error) {
 	var a model.Agent
-	err := sc.Scan(&a.ID, &a.ClassID, &a.Name, &a.Prompt, &a.Enabled, &a.CreatedAt, &a.UpdatedAt)
+	err := sc.Scan(&a.ID, &a.ClassID, &a.Name, &a.Prompt, &a.PromptTemplateID, &a.PromptTemplateName,
+		&a.AppID, &a.AppName, &a.Enabled, &a.CreatedAt, &a.UpdatedAt)
 	return a, err
 }
 
 func (s *Store) Agent(ctx context.Context, classID, id int64) (*model.Agent, error) {
-	a, err := scanAgent(s.DB.QueryRowContext(ctx, `SELECT id,class_id,name,prompt,enabled,created_at,updated_at FROM agents WHERE class_id=? AND id=?`, classID, id))
+	a, err := scanAgent(s.DB.QueryRowContext(ctx, agentSelect+`WHERE a.class_id=? AND a.id=?`, classID, id))
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +163,12 @@ func (s *Store) Agent(ctx context.Context, classID, id int64) (*model.Agent, err
 }
 
 func (s *Store) loadAgentBindings(ctx context.Context, a *model.Agent) error {
+	if a.SkillIDs == nil {
+		a.SkillIDs = []int64{}
+	}
+	if a.MaterialIDs == nil {
+		a.MaterialIDs = []int64{}
+	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT skill_id FROM agent_skills WHERE agent_id=? ORDER BY skill_id`, a.ID)
 	if err != nil {
 		return err
@@ -192,7 +203,8 @@ func (s *Store) CreateAgent(ctx context.Context, a *model.Agent) (int64, error) 
 		return 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `INSERT INTO agents(class_id,name,prompt,enabled) VALUES(?,?,?,?)`, a.ClassID, a.Name, a.Prompt, a.Enabled)
+	res, err := tx.ExecContext(ctx, `INSERT INTO agents(class_id,name,prompt,prompt_template_id,app_id,enabled) VALUES(?,?,?,?,?,?)`,
+		a.ClassID, a.Name, a.Prompt, a.PromptTemplateID, a.AppID, a.Enabled)
 	if err != nil {
 		return 0, err
 	}
@@ -209,7 +221,8 @@ func (s *Store) UpdateAgent(ctx context.Context, a *model.Agent) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE agents SET name=?,prompt=?,enabled=? WHERE class_id=? AND id=?`, a.Name, a.Prompt, a.Enabled, a.ClassID, a.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE agents SET name=?,prompt=?,prompt_template_id=?,app_id=?,enabled=? WHERE class_id=? AND id=?`,
+		a.Name, a.Prompt, a.PromptTemplateID, a.AppID, a.Enabled, a.ClassID, a.ID); err != nil {
 		return err
 	}
 	if err := replaceBindings(ctx, tx, a.ID, a.SkillIDs, a.MaterialIDs); err != nil {
@@ -257,5 +270,3 @@ func (s *Store) SetClassPrompt(ctx context.Context, classID int64, prompt string
 		ON DUPLICATE KEY UPDATE prompt=VALUES(prompt)`, classID, prompt)
 	return err
 }
-
-var _ = time.Time{}

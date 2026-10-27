@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CampusClaw 校园智能学习助手：对话、材料、智能体、提示词技能与 MCP 工具。" />
+  <meta name="description" content="CampusClaw 校园智能学习助手：对话、材料、AI 应用、智能体、提示词技能与 MCP 工具。" />
   <meta name="color-scheme" content="light">
   <title>CampusClaw · 校园智能学习助手</title>
   <link rel="stylesheet" href="/static/style.css">
@@ -125,6 +125,10 @@
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
             <span>材料</span>
           </button>
+          <button class="nav-item" type="button" data-view="apps">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/></svg>
+            <span>AI 应用</span>
+          </button>
           <button class="nav-item" type="button" data-view="agents">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></svg>
             <span>智能体</span>
@@ -160,6 +164,7 @@
       <main id="main-content" class="main" tabindex="-1">
         <section id="view-chat" class="view" data-view-panel="chat" hidden></section>
         <section id="view-materials" class="view" data-view-panel="materials" hidden></section>
+        <section id="view-apps" class="view" data-view-panel="apps" hidden></section>
         <section id="view-agents" class="view" data-view-panel="agents" hidden></section>
         <section id="view-skills" class="view" data-view-panel="skills" hidden></section>
         <section id="view-mcp" class="view" data-view-panel="mcp" hidden></section>

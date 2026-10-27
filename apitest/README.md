@@ -81,9 +81,12 @@ secrets.  No tokens are written to reports or logs.
 | search | keyword/vector/hybrid, empty query 400, negative limit/offset 400, no-evidence, class isolation, offset beyond range 200 empty |
 | ask | evidence answer with citations verified against DB chunks, fixed no-evidence text and `citations: []` |
 | prompt/skills/agents | prompt GET/PUT, skill create/update/delete + invalid/duplicate/tool validation, agent CRUD + bindings, student 403 |
+| prompt templates | list/create/detail/update/delete/preview/variables, allowed-variable enforcement (`{{question}}` 400), sample rendering, duplicate names, cross-class 404, student 403, delete→agents/apps survive with null link + DB/API checks |
+| skill upload | multipart `.md`/`.txt` create and replace, source_text persistence, bad extension/invalid content/empty/oversize (413), duplicate names, cross-class 404, student 403 |
+| AI apps | list/detail/create/update/delete/instantiate, disabled app hidden from students, cross-class template/skill/material validation, duplicate app/assistant names, default `<app name>助手`, app delete keeps agents with `app_id` null |
 | conversations | create with valid/invalid/disabled/other-class agent, own-only list, cross-user/cross-class 404, SSE meta/citations/skill/multiple deltas/done + persisted message rows |
 | MCP | register (token never echoed), duplicate 400, connect discovery exactly `formula_hint` + `unit_convert`, idempotent connect, invalid token 502, tool@server validation, disconnect→denied call + audit, class-scoped tool-calls, student 403, audited delete 503 |
-| E2E | unique server, connect, skill with `formula_hint@<server>`, agent create/update, conversation, streamed answer, `meta.tool_calls.status=ok` and matching audit row |
+| E2E | unique server, connect, skill with `formula_hint@<server>`, agent create/update, conversation, streamed answer, `meta.tool_calls.status=ok` and matching audit row; catalog flow template→preview→skill upload→app→assistant→chat→product deletes; template-delete fallback; skill upload lifecycle; multi-assistant app delete; app visibility matrix |
 
 MCP disconnect/E2E cases necessarily cross endpoint boundaries; every other
 case owns its fixture so ordering and partial failures cannot cascade.
@@ -113,3 +116,14 @@ running build and were fixed outside this suite (no Go changes were made here):
 
 The current cases assert the documented behaviour (404, `tool_count == 0`), so
 they will catch a regression.
+
+The new feature coverage also found three response-shape issues. They were
+fixed in the final build, and the cases now assert the corrected shapes:
+
+4. `PUT /api/apps/{id}` returns the reloaded app, including the current
+   `agent_count` (not a stale `0`).
+5. `POST /api/agents`, `PUT /api/agents/{id}`, `POST /api/apps`,
+   `PUT /api/apps/{id}` and `POST /api/apps/{id}/instantiate` reload the stored
+   row, so derived `prompt_template_name` / `app_name` fields are present.
+6. Omitted skill/material id arrays are normalized to `[]` in create/update
+   responses, matching the JSON stored in MySQL.

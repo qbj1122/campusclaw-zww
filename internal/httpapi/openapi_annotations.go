@@ -168,6 +168,104 @@ package httpapi
 // @Failure 500 {object} ErrorResponse
 // @Router /api/prompt [put]
 
+// @Summary 提示词模板列表
+// @Description 仅教师
+// @Description 列出本班提示词模板，并解析模板中使用到的变量。
+// @Tags prompt-templates
+// @Produce json
+// @Security Bearer
+// @Success 200 {object} PromptTemplateList
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-templates [get]
+
+// @Summary 创建提示词模板
+// @Description 仅教师
+// @Description 创建本班提示词模板；变量只允许 class_name/agent_name/student_name/skill_name/subject/date/materials。
+// @Tags prompt-templates
+// @Accept json
+// @Produce json
+// @Security Bearer
+// @Param body body PromptTemplateInput true "模板名称、说明与内容"
+// @Success 201 {object} PromptTemplate
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-templates [post]
+
+// @Summary 提示词模板详情
+// @Description 仅教师
+// @Description 返回模板详情及其变量；跨班或不存在统一返回 404。
+// @Tags prompt-templates
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Success 200 {object} PromptTemplate
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-templates/{id} [get]
+
+// @Summary 更新提示词模板
+// @Description 仅教师
+// @Description 替换模板名称、说明与内容，变量规则同创建。
+// @Tags prompt-templates
+// @Accept json
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Param body body PromptTemplateInput true "模板名称、说明与内容"
+// @Success 200 {object} PromptTemplate
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-templates/{id} [put]
+
+// @Summary 删除提示词模板
+// @Description 仅教师
+// @Description 删除模板；引用该模板的智能体回退到班级默认提示词。
+// @Tags prompt-templates
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Success 204 "已删除"
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-templates/{id} [delete]
+
+// @Summary 预览提示词模板
+// @Description 仅教师
+// @Description 使用示例值渲染模板，返回原始内容与渲染结果。
+// @Tags prompt-templates
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Success 200 {object} PromptPreview
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-templates/{id}/preview [post]
+
+// @Summary 提示词变量列表
+// @Description 仅教师
+// @Description 返回模板可用的内置变量及其说明。
+// @Tags prompt-templates
+// @Produce json
+// @Security Bearer
+// @Success 200 {object} PromptVariableList
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/prompt-variables [get]
+
 // @Summary 技能列表
 // @Description 列出本班技能及其工具绑定。
 // @Tags skills
@@ -192,6 +290,40 @@ package httpapi
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/skills [post]
+
+// @Summary 上传技能文件
+// @Description 仅教师
+// @Description 接收 multipart 表单中的技能文件（.md/.txt，≤64KB），解析后创建技能。
+// @Tags skills
+// @Accept multipart/form-data
+// @Produce json
+// @Security Bearer
+// @Param file formData file true "技能文件 (.md/.txt, ≤64KB)"
+// @Success 201 {object} Skill
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/skills/upload [post]
+
+// @Summary 上传替换技能文件
+// @Description 仅教师
+// @Description 用 multipart 表单中的技能文件替换现有技能。
+// @Tags skills
+// @Accept multipart/form-data
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Param file formData file true "技能文件 (.md/.txt, ≤64KB)"
+// @Success 200 {object} Skill
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/skills/{id}/upload [put]
 
 // @Summary 更新技能
 // @Description 仅教师
@@ -223,6 +355,90 @@ package httpapi
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/skills/{id} [delete]
+
+// @Summary AI 应用列表
+// @Description 学生仅能看到已启用应用，教师可见全部。
+// @Tags apps
+// @Produce json
+// @Security Bearer
+// @Success 200 {object} AIAppList
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/apps [get]
+
+// @Summary AI 应用详情
+// @Description 学生访问停用或他班应用统一返回 404。
+// @Tags apps
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Success 200 {object} AIApp
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/apps/{id} [get]
+
+// @Summary 创建 AI 应用
+// @Description 仅教师
+// @Description 创建本班应用；名称班内唯一，绑定的模板、技能与材料必须属于本班。
+// @Tags apps
+// @Accept json
+// @Produce json
+// @Security Bearer
+// @Param body body AIAppInput true "应用配置"
+// @Success 201 {object} AIApp
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/apps [post]
+
+// @Summary 更新 AI 应用
+// @Description 仅教师
+// @Description 更新应用配置；名称班内唯一，绑定只接受本班资源。
+// @Tags apps
+// @Accept json
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Param body body AIAppInput true "应用配置"
+// @Success 200 {object} AIApp
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/apps/{id} [put]
+
+// @Summary 删除 AI 应用
+// @Description 仅教师
+// @Description 删除应用；已有智能体保留，仅解除 app_id 关联。
+// @Tags apps
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Success 204 "已删除"
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/apps/{id} [delete]
+
+// @Summary 从应用创建智能体
+// @Description 仅教师
+// @Description 按应用默认配置创建智能体，默认名称为“应用名助手”；重名时需换名。
+// @Tags apps
+// @Accept json
+// @Produce json
+// @Security Bearer
+// @Param id path int true "编号"
+// @Param body body InstantiateAppInput false "可选助手名称"
+// @Success 201 {object} Agent
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/apps/{id}/instantiate [post]
 
 // @Summary 智能体列表
 // @Description 学生只看到启用智能体，教师可见全部。

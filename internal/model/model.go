@@ -81,16 +81,49 @@ type Skill struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-type Agent struct {
+type PromptTemplate struct {
 	ID          int64     `json:"id"`
 	ClassID     int64     `json:"class_id"`
 	Name        string    `json:"name"`
-	Prompt      string    `json:"prompt"`
-	Enabled     bool      `json:"enabled"`
-	SkillIDs    []int64   `json:"skill_ids"`
-	MaterialIDs []int64   `json:"material_ids"`
+	Description string    `json:"description"`
+	Content     string    `json:"content"`
+	Variables   []string  `json:"variables"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type AIApp struct {
+	ID                 int64     `json:"id"`
+	ClassID            int64     `json:"class_id"`
+	Name               string    `json:"name"`
+	Description        string    `json:"description"`
+	Category           string    `json:"category"`
+	Icon               string    `json:"icon"`
+	PromptTemplateID   *int64    `json:"prompt_template_id,omitempty"`
+	PromptTemplateName string    `json:"prompt_template_name,omitempty"`
+	DefaultPrompt      string    `json:"default_prompt"`
+	DefaultSkillIDs    []int64   `json:"default_skill_ids"`
+	DefaultMaterialIDs []int64   `json:"default_material_ids"`
+	Enabled            bool      `json:"enabled"`
+	AgentCount         int       `json:"agent_count"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type Agent struct {
+	ID                 int64     `json:"id"`
+	ClassID            int64     `json:"class_id"`
+	Name               string    `json:"name"`
+	Prompt             string    `json:"prompt"`
+	PromptTemplateID   *int64    `json:"prompt_template_id,omitempty"`
+	PromptTemplateName string    `json:"prompt_template_name,omitempty"`
+	AppID              *int64    `json:"app_id,omitempty"`
+	AppName            string    `json:"app_name,omitempty"`
+	Enabled            bool      `json:"enabled"`
+	SkillIDs           []int64   `json:"skill_ids"`
+	MaterialIDs        []int64   `json:"material_ids"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type Conversation struct {

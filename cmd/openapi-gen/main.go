@@ -312,7 +312,7 @@ func parseParameter(value string) (parameter, error) {
 		p.Desc = strings.Join(tokens[4:], " ")
 	}
 	switch p.In {
-	case "path", "query", "header", "body":
+	case "path", "query", "header", "body", "formData":
 	default:
 		return parameter{}, fmt.Errorf("unsupported parameter location %q", p.In)
 	}
@@ -392,6 +392,7 @@ func buildOperation(op operation) (map[string]any, error) {
 
 	var params []any
 	var body *parameter
+	var formParams []*parameter
 	for i := range op.Params {
 		p := &op.Params[i]
 		if p.In == "body" {
@@ -399,6 +400,10 @@ func buildOperation(op operation) (map[string]any, error) {
 				return nil, errors.New("only one body parameter is supported")
 			}
 			body = p
+			continue
+		}
+		if p.In == "formData" {
+			formParams = append(formParams, p)
 			continue
 		}
 		entry := map[string]any{
@@ -425,6 +430,30 @@ func buildOperation(op operation) (map[string]any, error) {
 		}
 		if body.Desc != "" {
 			built["requestBody"].(map[string]any)["description"] = body.Desc
+		}
+	}
+	if len(formParams) > 0 {
+		if body != nil {
+			return nil, errors.New("body and formData parameters cannot be combined")
+		}
+		properties := map[string]any{}
+		var required []string
+		for _, p := range formParams {
+			prop := schemaForType(p.Type)
+			if p.Desc != "" {
+				prop["description"] = p.Desc
+			}
+			properties[p.Name] = prop
+			if p.Required {
+				required = append(required, p.Name)
+			}
+		}
+		media := firstMediaType(op.Accept, "multipart/form-data")
+		built["requestBody"] = map[string]any{
+			"required": len(required) > 0,
+			"content": map[string]any{
+				media: map[string]any{"schema": objectSchema(properties, required...)},
+			},
 		}
 	}
 
@@ -594,8 +623,12 @@ func tagDescription(tag string) string {
 		return "检索与基于材料的问答"
 	case "prompt":
 		return "班级默认提示词"
+	case "prompt-templates":
+		return "提示词模板、变量与预览（仅教师）"
 	case "skills":
 		return "技能定义与工具绑定"
+	case "apps":
+		return "AI 应用目录与实例化"
 	case "agents":
 		return "智能体配置"
 	case "conversations":
@@ -841,6 +874,39 @@ func buildSchemas() map[string]any {
 			"prompt": stringSchema(),
 		}, "prompt"),
 
+		"PromptTemplate": objectSchema(map[string]any{
+			"id":          intSchema(),
+			"class_id":    intSchema(),
+			"name":        stringSchema(),
+			"description": stringSchema(),
+			"content":     stringSchema(),
+			"variables":   arraySchema(stringSchema()),
+			"created_at":  dateTimeSchema(),
+			"updated_at":  dateTimeSchema(),
+		}, "id", "class_id", "name", "description", "content", "variables", "created_at", "updated_at"),
+
+		"PromptTemplateList": objectSchema(map[string]any{
+			"items": arraySchema(refSchema("PromptTemplate")),
+		}, "items"),
+
+		"PromptTemplateInput": objectSchema(map[string]any{
+			"name":        stringSchema(),
+			"description": stringSchema(),
+			"content":     stringSchema(),
+		}, "name", "content"),
+
+		"PromptVariableList": objectSchema(map[string]any{
+			"items": arraySchema(objectSchema(map[string]any{
+				"name":        stringSchema(),
+				"description": stringSchema(),
+			}, "name", "description")),
+		}, "items"),
+
+		"PromptPreview": objectSchema(map[string]any{
+			"content":  stringSchema(),
+			"rendered": stringSchema(),
+		}, "content", "rendered"),
+
 		"Skill": objectSchema(map[string]any{
 			"id":           intSchema(),
 			"class_id":     intSchema(),
@@ -864,15 +930,19 @@ func buildSchemas() map[string]any {
 		}, "source_text"),
 
 		"Agent": objectSchema(map[string]any{
-			"id":           intSchema(),
-			"class_id":     intSchema(),
-			"name":         stringSchema(),
-			"prompt":       stringSchema(),
-			"enabled":      boolSchema(),
-			"skill_ids":    arraySchema(intSchema()),
-			"material_ids": arraySchema(intSchema()),
-			"created_at":   dateTimeSchema(),
-			"updated_at":   dateTimeSchema(),
+			"id":                   intSchema(),
+			"class_id":             intSchema(),
+			"name":                 stringSchema(),
+			"prompt":               stringSchema(),
+			"prompt_template_id":   map[string]any{"type": "integer", "format": "int64", "nullable": true},
+			"prompt_template_name": stringSchema(),
+			"app_id":               map[string]any{"type": "integer", "format": "int64", "nullable": true},
+			"app_name":             stringSchema(),
+			"enabled":              boolSchema(),
+			"skill_ids":            arraySchema(intSchema()),
+			"material_ids":         arraySchema(intSchema()),
+			"created_at":           dateTimeSchema(),
+			"updated_at":           dateTimeSchema(),
 		}, "id", "class_id", "name", "prompt", "enabled", "skill_ids", "material_ids"),
 
 		"AgentList": objectSchema(map[string]any{
@@ -880,12 +950,51 @@ func buildSchemas() map[string]any {
 		}, "items"),
 
 		"AgentInput": objectSchema(map[string]any{
-			"name":         stringSchema(),
-			"prompt":       stringSchema(),
-			"enabled":      boolSchema(),
-			"skill_ids":    arraySchema(intSchema()),
-			"material_ids": arraySchema(intSchema()),
+			"name":               stringSchema(),
+			"prompt":             stringSchema(),
+			"prompt_template_id": map[string]any{"type": "integer", "format": "int64", "nullable": true},
+			"enabled":            boolSchema(),
+			"skill_ids":          arraySchema(intSchema()),
+			"material_ids":       arraySchema(intSchema()),
 		}, "name"),
+
+		"AIApp": objectSchema(map[string]any{
+			"id":                   intSchema(),
+			"class_id":             intSchema(),
+			"name":                 stringSchema(),
+			"description":          stringSchema(),
+			"category":             stringSchema(),
+			"icon":                 stringSchema(),
+			"prompt_template_id":   map[string]any{"type": "integer", "format": "int64", "nullable": true},
+			"prompt_template_name": stringSchema(),
+			"default_prompt":       stringSchema(),
+			"default_skill_ids":    arraySchema(intSchema()),
+			"default_material_ids": arraySchema(intSchema()),
+			"enabled":              boolSchema(),
+			"agent_count":          map[string]any{"type": "integer"},
+			"created_at":           dateTimeSchema(),
+			"updated_at":           dateTimeSchema(),
+		}, "id", "class_id", "name", "description", "category", "icon", "default_prompt", "default_skill_ids", "default_material_ids", "enabled", "agent_count", "created_at", "updated_at"),
+
+		"AIAppList": objectSchema(map[string]any{
+			"items": arraySchema(refSchema("AIApp")),
+		}, "items"),
+
+		"AIAppInput": objectSchema(map[string]any{
+			"name":               stringSchema(),
+			"description":        stringSchema(),
+			"category":           stringSchema(),
+			"icon":               stringSchema(),
+			"prompt_template_id": map[string]any{"type": "integer", "format": "int64", "nullable": true},
+			"default_prompt":     stringSchema(),
+			"skill_ids":          arraySchema(intSchema()),
+			"material_ids":       arraySchema(intSchema()),
+			"enabled":            boolSchema(),
+		}, "name"),
+
+		"InstantiateAppInput": objectSchema(map[string]any{
+			"name": stringSchema(),
+		}),
 
 		"Conversation": objectSchema(map[string]any{
 			"id":         intSchema(),

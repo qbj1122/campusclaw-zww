@@ -29,7 +29,12 @@ const state = {
   view: 'chat',
   conversations: [],
   agents: [],
+  apps: [],
   skills: [],
+  promptTemplates: [],
+  promptVariables: [],
+  promptTemplatesLoaded: false,
+  promptVariablesLoaded: false,
   materials: [],
   mcpServers: [],
   currentConversationId: null,
@@ -40,6 +45,7 @@ const state = {
   streaming: false,
   streamAbort: null,
   materialQuery: '',
+  highlightSkillId: null,
   drawer: null,
   drawerSeq: 0,
   modalOnClose: null,
@@ -329,9 +335,15 @@ function clearSession() {
   state.user = null;
   state.conversations = [];
   state.agents = [];
+  state.apps = [];
   state.skills = [];
+  state.promptTemplates = [];
+  state.promptVariables = [];
+  state.promptTemplatesLoaded = false;
+  state.promptVariablesLoaded = false;
   state.materials = [];
   state.mcpServers = [];
+  state.highlightSkillId = null;
   if (state.drawer) closeDrawer();
   state.currentConversationId = null;
   state.currentConversation = null;
@@ -371,6 +383,7 @@ function cacheElements() {
   els.panels = {
     chat: byId('view-chat'),
     materials: byId('view-materials'),
+    apps: byId('view-apps'),
     agents: byId('view-agents'),
     skills: byId('view-skills'),
     mcp: byId('view-mcp'),
@@ -603,6 +616,7 @@ async function navigate(view, { force = false } = {}) {
   const loader = {
     chat: loadChatView,
     materials: loadMaterialsView,
+    apps: loadAppsView,
     agents: loadAgentsView,
     skills: loadSkillsView,
     mcp: loadMcpView,
@@ -680,6 +694,139 @@ function skillNameById(id) {
 
 function materialTitleById(id) {
   return state.materials.find((material) => Number(material.id) === Number(id))?.title || `材料 #${id}`;
+}
+
+const MAX_SKILL_FILE_BYTES = 64 * 1024;
+
+function skillFileError(file, label = '技能文件') {
+  const name = String(file?.name || '');
+  if (!/\.(md|txt)$/i.test(name)) return `${label}只支持 .md 或 .txt 文件。`;
+  if (!file.size) return `${label}不能为空。`;
+  if (file.size > MAX_SKILL_FILE_BYTES) return `${label}不能超过 64KB。`;
+  return '';
+}
+
+function readTextFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取文件失败，请重试。'));
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+function insertAtCursor(textarea, text) {
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? start;
+  textarea.setRangeText(text, start, end, 'end');
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input'));
+}
+
+async function copyText(text) {
+  const value = String(text ?? '');
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    /* fall back to a temporary textarea */
+  }
+  try {
+    const area = h('textarea', { class: 'copy-fallback', readonly: true, 'aria-hidden': 'true' });
+    area.value = value;
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function ensurePromptTemplates() {
+  if (!isTeacher() || state.promptTemplatesLoaded) return;
+  try {
+    const data = await api('/prompt-templates');
+    state.promptTemplates = Array.isArray(data?.items) ? data.items : [];
+    state.promptTemplatesLoaded = true;
+  } catch (error) {
+    if (error?.status !== 401) showToast(error?.message || '提示词模板加载失败。', 'error');
+  }
+}
+
+async function ensurePromptVariables() {
+  if (!isTeacher() || state.promptVariablesLoaded) return;
+  try {
+    const data = await api('/prompt-variables');
+    state.promptVariables = Array.isArray(data?.items) ? data.items : [];
+    state.promptVariablesLoaded = true;
+  } catch (error) {
+    if (error?.status !== 401) showToast(error?.message || '提示词变量加载失败。', 'error');
+  }
+}
+
+function buildPromptTemplateOptions(selectedID, fallbackName = '') {
+  const selected = selectedID != null ? Number(selectedID) : 0;
+  const options = [h('option', { value: '' }, '自定义提示词')];
+  state.promptTemplates.forEach((template) => {
+    options.push(h('option', {
+      value: String(template.id),
+      selected: Number(template.id) === selected,
+    }, template.name || `模板 #${template.id}`));
+  });
+  if (selected && !state.promptTemplates.some((template) => Number(template.id) === selected)) {
+    options.push(h('option', {
+      value: String(selected), selected: true,
+    }, fallbackName || `模板 #${selected}`));
+  }
+  return options;
+}
+
+async function ensureSkillMaterialCaches() {
+  if (state.skills.length && state.materials.length) return;
+  try {
+    const [skills, materials] = await Promise.all([
+      api('/skills').catch(() => null),
+      api('/materials').catch(() => null),
+    ]);
+    if (skills) state.skills = Array.isArray(skills.items) ? skills.items : [];
+    if (materials) state.materials = Array.isArray(materials.items) ? materials.items : [];
+  } catch {
+    /* keep existing caches */
+  }
+}
+
+function buildCheckGrid(items, selectedIds, { emptyText = '暂无可用项。', labelKey = 'name', tall = false } = {}) {
+  const grid = h('div', { class: `check-grid${tall ? ' check-grid-tall' : ''}` });
+  if (!items.length) {
+    grid.append(h('p', { class: 'field-hint' }, emptyText));
+    return grid;
+  }
+  items.forEach((item) => {
+    const input = h('input', {
+      type: 'checkbox',
+      value: String(item.id),
+      checked: selectedIds.has(String(item.id)),
+    });
+    grid.append(h('label', { class: 'check-item' },
+      input,
+      h('span', {}, item[labelKey] || '未命名'),
+    ));
+  });
+  return grid;
+}
+
+async function refreshAgentsCache() {
+  try {
+    const data = await api('/agents');
+    state.agents = Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    /* the visible view refreshes its own data */
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -1293,7 +1440,10 @@ async function openNewConversationDialog() {
       radio,
       h('span', { class: 'radio-body' },
         h('span', { class: 'radio-title' }, agent.name || '未命名智能体'),
-        h('span', { class: 'radio-sub' }, agent.prompt ? truncate(agent.prompt, 88) : '未填写提示词'),
+        h('span', { class: 'radio-sub' },
+          agent.prompt_template_name
+            ? `提示词模板：${agent.prompt_template_name}`
+            : (agent.prompt ? truncate(agent.prompt, 88) : '未填写提示词')),
       ),
     );
     radioList.append(card);
@@ -1817,6 +1967,363 @@ async function downloadMaterial(detail, button) {
 }
 
 /* --------------------------------------------------------------------------
+ * AI applications
+ * ------------------------------------------------------------------------ */
+
+async function loadAppsView() {
+  const panel = els.panels.apps;
+  panel.replaceChildren(loadingState('正在加载 AI 应用…'));
+  try {
+    const [appsPayload, skillsPayload, materialsPayload] = await Promise.all([
+      api('/apps'),
+      api('/skills').catch(() => null),
+      api('/materials').catch(() => null),
+    ]);
+    state.apps = Array.isArray(appsPayload?.items) ? appsPayload.items : [];
+    if (skillsPayload) state.skills = Array.isArray(skillsPayload.items) ? skillsPayload.items : [];
+    if (materialsPayload) state.materials = Array.isArray(materialsPayload.items) ? materialsPayload.items : [];
+  } catch (error) {
+    if (error?.status === 401) return;
+    renderViewError(panel, error, () => loadAppsView());
+    return;
+  }
+  renderAppsView();
+}
+
+function renderAppsView() {
+  const panel = els.panels.apps;
+  const teacher = isTeacher();
+  const actions = [
+    makeButton('刷新', { variant: 'secondary', onClick: () => loadAppsView() }),
+  ];
+  if (teacher) {
+    actions.push(makeButton('新建应用', {
+      variant: 'primary', icon: '+', onClick: () => openAppEditor(null),
+    }));
+  }
+
+  const nodes = [
+    viewHead(
+      'AI 应用',
+      teacher
+        ? '把提示词模板、默认提示词、技能与材料打包成应用，一键生成班级助手。'
+        : '查看老师启用的 AI 应用，并使用由应用创建的助手（只读）。',
+      actions,
+    ),
+  ];
+
+  if (!teacher) {
+    nodes.push(h('div', { class: 'notice-card' },
+      h('span', { class: 'notice-icon', 'aria-hidden': 'true' }, 'i'),
+      h('span', {}, '以下为老师启用的 AI 应用。创建助手由老师完成；已启用的助手可直接在“对话”中选择使用。'),
+    ));
+  }
+
+  if (!state.apps.length) {
+    nodes.push(h('div', { class: 'card' },
+      emptyState(
+        teacher ? '还没有 AI 应用' : '暂无可用 AI 应用',
+        teacher
+          ? '创建应用后，可一键生成带模板、技能和材料绑定的助手。'
+          : '老师还没有启用 AI 应用，请稍后再来看看。',
+        teacher ? makeButton('新建应用', { variant: 'primary', onClick: () => openAppEditor(null) }) : null,
+      ),
+    ));
+  } else {
+    const grid = h('div', { class: 'app-grid' });
+    state.apps.forEach((app) => grid.append(buildAppCard(app, teacher)));
+    nodes.push(grid);
+  }
+
+  panel.replaceChildren(...nodes);
+}
+
+function buildAppCard(app, teacher) {
+  const enabled = app.enabled !== false;
+  const skillIds = Array.isArray(app.default_skill_ids) ? app.default_skill_ids : [];
+  const materialIds = Array.isArray(app.default_material_ids) ? app.default_material_ids : [];
+  const agentCount = Number(app.agent_count) || 0;
+
+  const skillChips = h('div', { class: 'chip-row' });
+  if (skillIds.length) {
+    skillIds.forEach((id) => skillChips.append(h('span', { class: 'chip' }, skillNameById(id))));
+  } else {
+    skillChips.append(h('span', { class: 'chip chip-empty' }, '未绑定技能'));
+  }
+
+  const materialChips = h('div', { class: 'chip-row' });
+  if (materialIds.length) {
+    materialIds.forEach((id) => materialChips.append(h('span', { class: 'chip chip-material' }, materialTitleById(id))));
+  } else {
+    materialChips.append(h('span', { class: 'chip chip-empty' }, '未绑定材料'));
+  }
+
+  const actions = teacher ? h('div', { class: 'app-actions' },
+    makeButton('创建助手', {
+      variant: 'primary',
+      className: 'btn-xs',
+      disabled: !enabled,
+      title: enabled ? '' : '应用已停用，无法创建助手',
+      onClick: () => openAppInstantiate(app),
+    }),
+    makeButton('编辑', {
+      variant: 'ghost', className: 'btn-xs', onClick: () => openAppEditor(app),
+    }),
+    makeButton('删除', {
+      variant: 'danger-ghost', className: 'btn-xs', onClick: () => deleteApp(app),
+    }),
+  ) : null;
+
+  return h('article', { class: `app-card${enabled ? '' : ' is-disabled'}` },
+    h('div', { class: 'app-head' },
+      h('div', { class: 'app-icon', 'aria-hidden': 'true' }, app.icon || '✨'),
+      h('div', { class: 'app-title-wrap' },
+        h('h2', { class: 'app-name' }, app.name || '未命名应用'),
+        h('div', { class: 'app-meta-line' },
+          pill(app.category || '通用', 'blue'),
+          enabled ? pill('已启用', 'green') : pill('已停用', 'gray'),
+          pill(`${agentCount} 个助手`, 'gray'),
+        ),
+      ),
+    ),
+    h('p', { class: 'app-desc' }, app.description || '未填写应用说明。'),
+    app.default_prompt ? h('p', { class: 'app-prompt' }, truncate(app.default_prompt, 180)) : null,
+    app.prompt_template_name
+      ? h('div', { class: 'app-template-row' },
+        h('span', { class: 'meta-label' }, '提示词模板'),
+        h('span', { class: 'chip chip-template' }, app.prompt_template_name),
+      )
+      : null,
+    h('div', { class: 'app-bindings' },
+      h('div', { class: 'binding-row' },
+        h('span', { class: 'binding-label' }, '技能'),
+        skillChips,
+      ),
+      h('div', { class: 'binding-row' },
+        h('span', { class: 'binding-label' }, '材料'),
+        materialChips,
+      ),
+    ),
+    actions,
+  );
+}
+
+function openAppInstantiate(app) {
+  if (!isTeacher()) return;
+  const defaultName = `${app.name || 'AI 应用'}助手`;
+  const nameInput = h('input', {
+    type: 'text', name: 'name', maxlength: 64, value: defaultName, required: true,
+  });
+  const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+  const form = h('form', { id: 'app-instantiate-form', class: 'dialog-form' },
+    h('p', { class: 'field-hint' },
+      '将使用该应用的提示词模板、默认提示词、技能与材料创建助手，创建后可在“智能体”中继续调整。'),
+    h('div', { class: 'field' },
+      h('label', {}, '助手名称'),
+      nameInput,
+      h('p', { class: 'field-hint' }, '班内名称必须唯一；如果重名，可在此换一个名称后重试。'),
+    ),
+    error,
+  );
+
+  const submit = makeButton('创建助手', { variant: 'primary', type: 'submit' });
+  submit.setAttribute('form', 'app-instantiate-form');
+  const cancel = makeButton('取消', { variant: 'secondary', onClick: closeModal });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    const name = nameInput.value.trim();
+    if (!name) {
+      error.textContent = '请填写助手名称。';
+      error.hidden = false;
+      return;
+    }
+    setBusy(submit, true);
+    try {
+      const created = await api(`/apps/${app.id}/instantiate`, {
+        method: 'POST',
+        body: { name },
+      });
+      closeModal();
+      showToast(`已创建助手“${created?.name || name}”。`, 'success');
+      await loadAppsView();
+      await refreshAgentsCache();
+    } catch (err) {
+      error.textContent = err?.message || '创建助手失败。';
+      error.hidden = false;
+      if (err?.status === 400) {
+        nameInput.focus();
+        nameInput.select();
+      }
+      showToast(err?.message || '创建助手失败。', 'error');
+    } finally {
+      setBusy(submit, false);
+    }
+  });
+
+  openModal({
+    title: `创建助手 · ${app.name || 'AI 应用'}`,
+    body: form,
+    footer: h('div', { class: 'modal-actions' }, cancel, submit),
+  });
+  nameInput.select();
+}
+
+async function openAppEditor(app) {
+  if (!isTeacher()) return;
+  const editing = Boolean(app);
+  await ensureSkillMaterialCaches();
+  await ensurePromptTemplates();
+
+  const nameInput = h('input', {
+    type: 'text', name: 'name', maxlength: 64, value: app?.name || '',
+    placeholder: '例如：数学错题教练', required: true,
+  });
+  const categoryInput = h('input', {
+    type: 'text', name: 'category', maxlength: 32, value: app?.category || '通用',
+    placeholder: '例如：数学',
+  });
+  const iconInput = h('input', {
+    type: 'text', name: 'icon', maxlength: 8, value: app?.icon || '✨',
+    placeholder: '✨',
+  });
+  const descriptionInput = h('textarea', {
+    name: 'description', rows: 2, maxlength: 255, value: app?.description || '',
+    placeholder: '一句话说明这个应用适合什么场景（可选）',
+  });
+  const enabledInput = h('input', {
+    type: 'checkbox', name: 'enabled', checked: app ? app.enabled !== false : true,
+  });
+  const templateSelect = h('select', { name: 'prompt_template_id', id: 'app-template' },
+    ...buildPromptTemplateOptions(app?.prompt_template_id, app?.prompt_template_name));
+  const defaultPromptInput = h('textarea', {
+    name: 'default_prompt', rows: 6, maxlength: 2000, value: app?.default_prompt || '',
+    placeholder: '创建助手时写入的默认提示词；选择模板时作为回退保留…',
+  });
+
+  const selectedSkillIds = new Set((app?.default_skill_ids || []).map(String));
+  const selectedMaterialIds = new Set((app?.default_material_ids || []).map(String));
+  const skillChecks = buildCheckGrid(state.skills, selectedSkillIds, { emptyText: '暂无可用技能。' });
+  const materialChecks = buildCheckGrid(state.materials, selectedMaterialIds, {
+    emptyText: '暂无可用材料。', labelKey: 'title', tall: true,
+  });
+
+  const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+  const form = h('form', { id: 'app-form', class: 'dialog-form' },
+    h('div', { class: 'form-grid' },
+      h('div', { class: 'field' },
+        h('label', {}, '应用名称'),
+        nameInput,
+      ),
+      h('div', { class: 'field' },
+        h('label', {}, '分类'),
+        categoryInput,
+      ),
+      h('div', { class: 'field' },
+        h('label', {}, '图标'),
+        iconInput,
+        h('p', { class: 'field-hint' }, '短文本或 emoji，最多 8 个字符。'),
+      ),
+      h('div', { class: 'field checkbox-field' },
+        h('label', { class: 'check-item' }, enabledInput, h('span', {}, '启用该应用（学生可见）')),
+      ),
+      h('div', { class: 'field field-wide' },
+        h('label', {}, '应用说明'),
+        descriptionInput,
+        h('p', { class: 'field-hint' }, '最多 255 字。'),
+      ),
+      h('div', { class: 'field field-wide' },
+        h('label', { for: 'app-template' }, '提示词模板'),
+        templateSelect,
+        h('p', { class: 'field-hint' }, '选择模板后，助手回答时由服务器渲染变量；下方默认提示词作为回退保留。'),
+      ),
+      h('div', { class: 'field field-wide' },
+        h('label', {}, '默认提示词（自定义 / 回退）'),
+        defaultPromptInput,
+        h('p', { class: 'field-hint' }, '最多 2000 字，创建助手时写入。'),
+      ),
+      h('div', { class: 'field field-wide' },
+        h('label', {}, '默认绑定技能'),
+        skillChecks,
+      ),
+      h('div', { class: 'field field-wide' },
+        h('label', {}, '默认绑定材料'),
+        materialChecks,
+      ),
+    ),
+    error,
+  );
+
+  const submit = makeButton(editing ? '保存修改' : '创建应用', {
+    variant: 'primary', type: 'submit',
+  });
+  submit.setAttribute('form', 'app-form');
+  const cancel = makeButton('取消', { variant: 'secondary', onClick: closeModal });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    const name = nameInput.value.trim();
+    if (!name) {
+      error.textContent = '请填写应用名称。';
+      error.hidden = false;
+      return;
+    }
+    const payload = {
+      name,
+      description: descriptionInput.value.trim(),
+      category: categoryInput.value.trim(),
+      icon: iconInput.value.trim(),
+      prompt_template_id: templateSelect.value ? Number(templateSelect.value) : null,
+      default_prompt: defaultPromptInput.value,
+      skill_ids: Array.from(skillChecks.querySelectorAll('input:checked')).map((input) => Number(input.value)),
+      material_ids: Array.from(materialChecks.querySelectorAll('input:checked')).map((input) => Number(input.value)),
+      enabled: enabledInput.checked,
+    };
+    setBusy(submit, true);
+    try {
+      if (editing) await api(`/apps/${app.id}`, { method: 'PUT', body: payload });
+      else await api('/apps', { method: 'POST', body: payload });
+      closeModal();
+      showToast(editing ? 'AI 应用已更新。' : 'AI 应用已创建。', 'success');
+      await loadAppsView();
+    } catch (err) {
+      error.textContent = err?.message || '保存 AI 应用失败。';
+      error.hidden = false;
+      showToast(err?.message || '保存 AI 应用失败。', 'error');
+    } finally {
+      setBusy(submit, false);
+    }
+  });
+
+  openModal({
+    title: editing ? '编辑 AI 应用' : '新建 AI 应用',
+    body: form,
+    footer: h('div', { class: 'modal-actions' }, cancel, submit),
+    wide: true,
+  });
+}
+
+async function deleteApp(app) {
+  const confirmed = await confirmDialog({
+    title: '删除 AI 应用',
+    message: `确定删除“${app.name || '未命名应用'}”吗？\n已由该应用创建的助手不会被删除，但会失去与应用关联，可继续在“智能体”中单独维护。`,
+    confirmText: '删除应用',
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    await api(`/apps/${app.id}`, { method: 'DELETE' });
+    showToast('AI 应用已删除。', 'success');
+    await loadAppsView();
+    await refreshAgentsCache();
+  } catch (error) {
+    showToast(error?.message || '删除 AI 应用失败。', 'error');
+  }
+}
+
+/* --------------------------------------------------------------------------
  * Agents
  * ------------------------------------------------------------------------ */
 
@@ -1903,6 +2410,12 @@ function buildAgentCard(agent, teacher) {
     }));
   }
 
+  const titleWrap = h('div', { class: 'agent-title-wrap' },
+    h('h2', { class: 'agent-name' }, agent.name || '未命名智能体'),
+    agent.app_name ? h('span', { class: 'chip chip-app' }, `应用 · ${agent.app_name}`) : null,
+    enabled ? pill('已启用', 'green') : pill('已停用', 'gray'),
+  );
+
   const chips = h('div', { class: 'chip-row' });
   if (skillIds.length) {
     skillIds.forEach((id) => chips.append(h('span', { class: 'chip' }, skillNameById(id))));
@@ -1917,15 +2430,21 @@ function buildAgentCard(agent, teacher) {
     materialChips.append(h('span', { class: 'chip chip-empty' }, '未绑定材料'));
   }
 
+  const promptText = agent.prompt
+    || (agent.prompt_template_name ? '未填写回退提示词，回答时使用模板渲染。' : '未填写提示词。');
+
   return h('article', { class: `agent-card${enabled ? '' : ' is-disabled'}` },
     h('div', { class: 'agent-head' },
-      h('div', { class: 'agent-title-wrap' },
-        h('h2', { class: 'agent-name' }, agent.name || '未命名智能体'),
-        enabled ? pill('已启用', 'green') : pill('已停用', 'gray'),
-      ),
+      titleWrap,
       teacher ? h('div', { class: 'card-actions' }, ...headActions) : null,
     ),
-    h('p', { class: 'agent-prompt' }, agent.prompt || '未填写提示词。'),
+    agent.prompt_template_name
+      ? h('div', { class: 'agent-template-row' },
+        h('span', { class: 'meta-label' }, '提示词模板'),
+        h('span', { class: 'chip chip-template' }, agent.prompt_template_name),
+      )
+      : null,
+    h('p', { class: 'agent-prompt' }, promptText),
     h('div', { class: 'agent-bindings' },
       h('div', { class: 'binding-row' },
         h('span', { class: 'binding-label' }, '技能'),
@@ -1942,18 +2461,8 @@ function buildAgentCard(agent, teacher) {
 async function openAgentEditor(agent) {
   if (!isTeacher()) return;
   const editing = Boolean(agent);
-  if (!state.skills.length || !state.materials.length) {
-    try {
-      const [skills, materials] = await Promise.all([
-        api('/skills').catch(() => null),
-        api('/materials').catch(() => null),
-      ]);
-      if (skills) state.skills = Array.isArray(skills.items) ? skills.items : [];
-      if (materials) state.materials = Array.isArray(materials.items) ? materials.items : [];
-    } catch {
-      /* keep existing caches */
-    }
-  }
+  await ensureSkillMaterialCaches();
+  await ensurePromptTemplates();
 
   const nameInput = h('input', {
     type: 'text', name: 'name', maxlength: 64, value: agent?.name || '',
@@ -1966,38 +2475,30 @@ async function openAgentEditor(agent) {
   const enabledInput = h('input', {
     type: 'checkbox', name: 'enabled', checked: agent ? agent.enabled !== false : true,
   });
+
+  const selectedTemplateID = agent?.prompt_template_id != null ? Number(agent.prompt_template_id) : 0;
+  const templateSelect = h('select', { name: 'prompt_template_id', id: 'agent-template' },
+    ...buildPromptTemplateOptions(selectedTemplateID, agent?.prompt_template_name));
+  const templateHint = h('p', { class: 'field-hint' });
+  const syncTemplateHint = () => {
+    if (templateSelect.value) {
+      templateHint.textContent = '回答时由服务器渲染模板变量；下方提示词作为模板不可用时的回退保留。';
+      templateHint.classList.add('is-emphasis');
+    } else {
+      templateHint.textContent = '未选择模板时使用下方的自定义提示词。';
+      templateHint.classList.remove('is-emphasis');
+    }
+  };
+  templateSelect.addEventListener('change', syncTemplateHint);
+  syncTemplateHint();
+
   const selectedSkillIds = new Set((agent?.skill_ids || []).map(String));
   const selectedMaterialIds = new Set((agent?.material_ids || []).map(String));
 
-  const skillChecks = h('div', { class: 'check-grid' });
-  if (state.skills.length) {
-    state.skills.forEach((skill) => {
-      const input = h('input', {
-        type: 'checkbox', value: String(skill.id), checked: selectedSkillIds.has(String(skill.id)),
-      });
-      skillChecks.append(h('label', { class: 'check-item' },
-        input,
-        h('span', {}, skill.name || '未命名技能'),
-      ));
-    });
-  } else {
-    skillChecks.append(h('p', { class: 'field-hint' }, '暂无可用技能。'));
-  }
-
-  const materialChecks = h('div', { class: 'check-grid check-grid-tall' });
-  if (state.materials.length) {
-    state.materials.forEach((material) => {
-      const input = h('input', {
-        type: 'checkbox', value: String(material.id), checked: selectedMaterialIds.has(String(material.id)),
-      });
-      materialChecks.append(h('label', { class: 'check-item' },
-        input,
-        h('span', {}, material.title || '未命名材料'),
-      ));
-    });
-  } else {
-    materialChecks.append(h('p', { class: 'field-hint' }, '暂无可用材料。'));
-  }
+  const skillChecks = buildCheckGrid(state.skills, selectedSkillIds, { emptyText: '暂无可用技能。' });
+  const materialChecks = buildCheckGrid(state.materials, selectedMaterialIds, {
+    emptyText: '暂无可用材料。', labelKey: 'title', tall: true,
+  });
 
   const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
   const form = h('form', { id: 'agent-form', class: 'dialog-form' },
@@ -2008,9 +2509,14 @@ async function openAgentEditor(agent) {
         h('p', { class: 'field-hint' }, '班内名称必须唯一，最多 64 字。'),
       ),
       h('div', { class: 'field field-wide' },
-        h('label', {}, '提示词'),
+        h('label', { for: 'agent-template' }, '提示词模板'),
+        templateSelect,
+        templateHint,
+      ),
+      h('div', { class: 'field field-wide' },
+        h('label', {}, '提示词（自定义 / 回退）'),
         promptInput,
-        h('p', { class: 'field-hint' }, '最多 2000 字。'),
+        h('p', { class: 'field-hint' }, '最多 2000 字。选择模板后，此处仍会保存作为回退提示词。'),
       ),
       h('div', { class: 'field field-wide checkbox-field' },
         h('label', { class: 'check-item' }, enabledInput, h('span', {}, '启用该智能体（学生可见）')),
@@ -2045,6 +2551,7 @@ async function openAgentEditor(agent) {
     const payload = {
       name,
       prompt: promptInput.value,
+      prompt_template_id: templateSelect.value ? Number(templateSelect.value) : null,
       enabled: enabledInput.checked,
       skill_ids: Array.from(skillChecks.querySelectorAll('input:checked')).map((input) => Number(input.value)),
       material_ids: Array.from(materialChecks.querySelectorAll('input:checked')).map((input) => Number(input.value)),
@@ -2097,19 +2604,29 @@ async function deleteAgent(agent) {
 async function loadSkillsView() {
   const panel = els.panels.skills;
   panel.replaceChildren(loadingState('正在加载提示词与技能…'));
+  const teacher = isTeacher();
+  const requests = [api('/prompt'), api('/skills')];
+  if (teacher) {
+    requests.push(api('/prompt-templates'), api('/prompt-variables'));
+  }
   let promptPayload;
   let skillsPayload;
+  let templatesPayload = null;
+  let variablesPayload = null;
   try {
-    [promptPayload, skillsPayload] = await Promise.all([
-      api('/prompt'),
-      api('/skills'),
-    ]);
+    [promptPayload, skillsPayload, templatesPayload, variablesPayload] = await Promise.all(requests);
   } catch (error) {
     if (error?.status === 401) return;
     renderViewError(panel, error, () => loadSkillsView());
     return;
   }
   state.skills = Array.isArray(skillsPayload?.items) ? skillsPayload.items : [];
+  if (teacher) {
+    state.promptTemplates = Array.isArray(templatesPayload?.items) ? templatesPayload.items : [];
+    state.promptVariables = Array.isArray(variablesPayload?.items) ? variablesPayload.items : [];
+    state.promptTemplatesLoaded = true;
+    state.promptVariablesLoaded = true;
+  }
   renderSkillsView(promptPayload?.prompt || '');
 }
 
@@ -2119,17 +2636,33 @@ function renderSkillsView(prompt) {
   const refreshButton = makeButton('刷新', {
     variant: 'secondary', onClick: () => loadSkillsView(),
   });
+  const uploadInput = h('input', {
+    type: 'file', accept: '.md,.txt', hidden: true, 'aria-hidden': 'true',
+  });
+  let uploadButton = null;
+  if (teacher) {
+    uploadButton = makeButton('上传技能文件', {
+      variant: 'primary',
+      icon: '↑',
+      onClick: () => uploadInput.click(),
+    });
+    uploadInput.addEventListener('change', () => uploadSkillFile(uploadInput, uploadButton));
+  }
   const newButton = teacher ? makeButton('新建技能', {
-    variant: 'primary', icon: '+', onClick: () => openSkillEditor(null),
+    variant: 'secondary', icon: '+', onClick: () => openSkillEditor(null),
   }) : null;
 
   const promptCard = buildPromptCard(prompt, teacher);
+  const templateSection = teacher ? buildTemplateSection() : null;
   const skillsHead = h('div', { class: 'section-head' },
     h('div', {},
       h('h2', { class: 'section-title' }, '班级技能'),
       h('p', { class: 'section-sub' }, teacher ? '技能文件由元数据与引导正文组成，保存前会校验工具引用。' : '以下技能由老师配置，学生只读。'),
     ),
-    h('div', { class: 'section-actions' }, newButton),
+    h('div', { class: 'section-actions' },
+      teacher ? h('span', { class: 'file-trigger' }, uploadButton, uploadInput) : null,
+      newButton,
+    ),
   );
 
   let skillsContent;
@@ -2148,11 +2681,296 @@ function renderSkillsView(prompt) {
   }
 
   panel.replaceChildren(
-    viewHead('提示词与技能', '设置班级默认提示词，并维护可复用的引导技能。', [refreshButton]),
+    viewHead('提示词与技能', teacher ? '设置班级默认提示词与可复用模板，并维护引导技能。' : '查看班级默认提示词与引导技能（只读）。', [refreshButton]),
     promptCard,
+    templateSection,
     skillsHead,
     skillsContent,
   );
+}
+
+function buildTemplateSection() {
+  const newButton = makeButton('新建模板', {
+    variant: 'primary', icon: '+', onClick: () => openTemplateEditor(null),
+  });
+  const nodes = [
+    h('div', { class: 'section-head' },
+      h('div', {},
+        h('h2', { class: 'section-title' }, '提示词模板'),
+        h('p', { class: 'section-sub' }, '模板可复用，回答时由服务器按班级、智能体、技能与材料等真实信息渲染。'),
+      ),
+      h('div', { class: 'section-actions' }, newButton),
+    ),
+  ];
+
+  if (!state.promptTemplates.length) {
+    nodes.push(h('div', { class: 'card' },
+      emptyState(
+        '还没有提示词模板',
+        '创建模板后，可在智能体或 AI 应用中选择它，回答时自动填充变量。',
+        makeButton('新建模板', { variant: 'primary', onClick: () => openTemplateEditor(null) }),
+      ),
+    ));
+  } else {
+    const grid = h('div', { class: 'template-grid' });
+    state.promptTemplates.forEach((template) => grid.append(buildTemplateCard(template)));
+    nodes.push(grid);
+  }
+  return h('div', { class: 'template-section' }, ...nodes);
+}
+
+function buildTemplateCard(template) {
+  const variables = Array.isArray(template.variables) ? template.variables : [];
+  const actions = [
+    makeButton('预览', {
+      variant: 'ghost', className: 'btn-xs', onClick: () => openTemplatePreview(template),
+    }),
+    makeButton('编辑', {
+      variant: 'ghost', className: 'btn-xs', onClick: () => openTemplateEditor(template),
+    }),
+    makeButton('复制内容', {
+      variant: 'ghost', className: 'btn-xs', onClick: () => copyTemplateContent(template),
+    }),
+    makeButton('删除', {
+      variant: 'danger-ghost', className: 'btn-xs', onClick: () => deleteTemplate(template),
+    }),
+  ];
+
+  const varRow = h('div', { class: 'template-vars' },
+    h('span', { class: 'meta-label' }, '变量'),
+  );
+  if (variables.length) {
+    variables.forEach((name) => varRow.append(h('code', { class: 'chip chip-template' }, `{{${name}}}`)));
+  } else {
+    varRow.append(h('span', { class: 'chip chip-empty' }, '无模板变量'));
+  }
+
+  return h('article', { class: 'template-card' },
+    h('div', { class: 'template-head' },
+      h('div', { class: 'template-title-wrap' },
+        h('h3', { class: 'template-name' }, template.name || '未命名模板'),
+        variables.length ? pill(`${variables.length} 个变量`, 'blue') : pill('静态提示词', 'gray'),
+      ),
+      h('div', { class: 'card-actions' }, ...actions),
+    ),
+    h('p', { class: 'template-desc' }, template.description || '未填写模板说明。'),
+    h('p', { class: 'template-snippet' }, truncate(template.content || '', 140)),
+    varRow,
+  );
+}
+
+async function copyTemplateContent(template) {
+  const ok = await copyText(template.content || '');
+  if (ok) showToast(`已复制模板“${template.name || '未命名模板'}”的内容。`, 'success');
+  else showToast('复制失败，请打开编辑后手动选择内容。', 'error');
+}
+
+function openTemplatePreview(template) {
+  const body = h('div', { class: 'template-preview-dialog' }, loadingState('正在由服务器渲染预览…'));
+  openModal({
+    title: `模板预览 · ${template.name || '未命名模板'}`,
+    body,
+    wide: true,
+  });
+  (async () => {
+    try {
+      const data = await api(`/prompt-templates/${template.id}/preview`, { method: 'POST' });
+      body.replaceChildren(
+        h('p', { class: 'field-hint' }, '预览由服务器使用示例班级、智能体与技能信息渲染，实际回答会替换为当前真实信息。'),
+        h('div', { class: 'template-preview' },
+          h('div', { class: 'template-preview-head' },
+            h('span', {}, '渲染结果'),
+            pill('只读', 'gray'),
+          ),
+          h('pre', { class: 'template-preview-block' }, data?.rendered || ''),
+        ),
+      );
+    } catch (error) {
+      if (error?.status === 401) return;
+      body.replaceChildren(
+        inlineError(error?.message || '模板预览失败。', () => openTemplatePreview(template)),
+      );
+    }
+  })();
+}
+
+async function openTemplateEditor(template) {
+  if (!isTeacher()) return;
+  await ensurePromptVariables();
+  const editing = Boolean(template);
+  const nameInput = h('input', {
+    type: 'text', name: 'name', maxlength: 64, value: template?.name || '',
+    placeholder: '例如：数学错题引导', required: true,
+  });
+  const descriptionInput = h('input', {
+    type: 'text', name: 'description', maxlength: 255, value: template?.description || '',
+    placeholder: '一句话说明模板用途（可选）',
+  });
+  const contentInput = h('textarea', {
+    name: 'content', class: 'template-content-input', rows: 14, maxlength: 4000,
+    value: template?.content || '',
+    placeholder: '输入模板正文，使用 {{变量名}} 插入动态信息…',
+    spellcheck: false,
+  });
+  const count = h('span', { class: 'char-count' }, `${Array.from(contentInput.value).length}/4000`);
+  const updateCount = () => {
+    count.textContent = `${Array.from(contentInput.value).length}/4000`;
+  };
+  contentInput.addEventListener('input', updateCount);
+  let cursorPlaced = false;
+  const markCursor = () => { cursorPlaced = true; };
+  contentInput.addEventListener('focus', markCursor);
+  contentInput.addEventListener('click', markCursor);
+  contentInput.addEventListener('keyup', markCursor);
+
+  const variableList = h('div', { class: 'template-variable-list' });
+  if (state.promptVariables.length) {
+    state.promptVariables.forEach((variable) => {
+      const name = String(variable.name || '');
+      const button = h('button', {
+        type: 'button',
+        class: 'variable-btn',
+        title: `插入 {{${name}}}`,
+      },
+      h('code', { class: 'variable-name' }, `{{${name}}}`),
+      h('span', { class: 'variable-desc' }, variable.description || ''),
+      );
+      button.addEventListener('click', () => {
+        if (!cursorPlaced) {
+          contentInput.setSelectionRange(contentInput.value.length, contentInput.value.length);
+          cursorPlaced = true;
+        }
+        insertAtCursor(contentInput, `{{${name}}}`);
+      });
+      variableList.append(button);
+    });
+  } else {
+    variableList.append(h('p', { class: 'field-hint' }, '暂时无法获取可用变量，可手动输入 {{变量名}}。'));
+  }
+
+  const previewButton = makeButton('预览渲染结果', { variant: 'secondary', type: 'button' });
+  const previewBlock = h('div', { class: 'template-preview', hidden: true });
+  previewButton.addEventListener('click', async () => {
+    if (!editing) {
+      showToast('请先创建模板，再使用服务器预览。', 'info');
+      return;
+    }
+    setBusy(previewButton, true);
+    try {
+      const data = await api(`/prompt-templates/${template.id}/preview`, { method: 'POST' });
+      previewBlock.replaceChildren(
+        h('div', { class: 'template-preview-head' },
+          h('span', {}, '服务器渲染结果（基于已保存内容）'),
+          pill('只读', 'gray'),
+        ),
+        h('pre', { class: 'template-preview-block' }, data?.rendered || ''),
+      );
+      previewBlock.hidden = false;
+    } catch (error) {
+      if (error?.status !== 401) showToast(error?.message || '模板预览失败。', 'error');
+    } finally {
+      setBusy(previewButton, false);
+    }
+  });
+
+  const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+  const form = h('form', { id: 'template-form', class: 'dialog-form' },
+    h('div', { class: 'form-grid' },
+      h('div', { class: 'field' },
+        h('label', {}, '模板名称'),
+        nameInput,
+      ),
+      h('div', { class: 'field' },
+        h('label', {}, '模板说明'),
+        descriptionInput,
+      ),
+      h('div', { class: 'field field-wide' },
+        h('div', { class: 'field-label-row' },
+          h('label', {}, '模板内容'),
+          count,
+        ),
+        contentInput,
+      ),
+      h('div', { class: 'field field-wide template-variables-panel' },
+        h('p', { class: 'field-hint' }, '点击变量可插入到光标位置；只支持以下服务器变量，学生问题不会作为变量。'),
+        variableList,
+      ),
+      h('div', { class: 'field field-wide' },
+        h('div', { class: 'field-label-row' },
+          h('span', { class: 'field-hint' }, '预览使用已保存的模板内容，保存后即可查看最新渲染结果。'),
+          previewButton,
+        ),
+        previewBlock,
+      ),
+    ),
+    error,
+  );
+
+  const submit = makeButton(editing ? '保存修改' : '创建模板', {
+    variant: 'primary', type: 'submit',
+  });
+  submit.setAttribute('form', 'template-form');
+  const cancel = makeButton('取消', { variant: 'secondary', onClick: closeModal });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    const name = nameInput.value.trim();
+    if (!name) {
+      error.textContent = '请填写模板名称。';
+      error.hidden = false;
+      return;
+    }
+    const content = contentInput.value;
+    if (!content.trim()) {
+      error.textContent = '请填写模板内容。';
+      error.hidden = false;
+      return;
+    }
+    const payload = {
+      name,
+      description: descriptionInput.value.trim(),
+      content,
+    };
+    setBusy(submit, true);
+    try {
+      if (editing) await api(`/prompt-templates/${template.id}`, { method: 'PUT', body: payload });
+      else await api('/prompt-templates', { method: 'POST', body: payload });
+      closeModal();
+      showToast(editing ? '提示词模板已更新。' : '提示词模板已创建。', 'success');
+      await loadSkillsView();
+    } catch (err) {
+      error.textContent = err?.message || '保存提示词模板失败。';
+      error.hidden = false;
+      showToast(err?.message || '保存提示词模板失败。', 'error');
+    } finally {
+      setBusy(submit, false);
+    }
+  });
+
+  openModal({
+    title: editing ? '编辑提示词模板' : '新建提示词模板',
+    body: form,
+    footer: h('div', { class: 'modal-actions' }, cancel, submit),
+    wide: true,
+  });
+}
+
+async function deleteTemplate(template) {
+  const confirmed = await confirmDialog({
+    title: '删除提示词模板',
+    message: `确定删除“${template.name || '未命名模板'}”吗？绑定了该模板的智能体与 AI 应用会回退到自定义提示词。`,
+    confirmText: '删除',
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    await api(`/prompt-templates/${template.id}`, { method: 'DELETE' });
+    showToast('提示词模板已删除。', 'success');
+    await loadSkillsView();
+  } catch (error) {
+    showToast(error?.message || '删除提示词模板失败。', 'error');
+  }
 }
 
 function buildPromptCard(prompt, teacher) {
@@ -2218,8 +3036,11 @@ function buildSkillCard(skill, teacher) {
   }
 
   const trigger = h('span', { class: 'skill-trigger' }, skill.trigger_text || '未设置适用条件');
+  const highlighted = state.highlightSkillId != null && Number(state.highlightSkillId) === Number(skill.id);
 
-  return h('article', { class: `skill-card${enabled ? '' : ' is-disabled'}` },
+  return h('article', {
+    class: `skill-card${enabled ? '' : ' is-disabled'}${highlighted ? ' is-highlighted' : ''}`,
+  },
     h('div', { class: 'skill-head' },
       h('div', { class: 'skill-title-wrap' },
         h('h3', { class: 'skill-name' }, skill.name || '未命名技能'),
@@ -2262,6 +3083,37 @@ function openSkillEditor(skill) {
     textarea.scrollTop = 0;
   });
 
+  const loadFileInput = h('input', {
+    type: 'file', id: 'skill-load-file', accept: '.md,.txt',
+  });
+  const loadFileHint = h('p', { class: 'field-hint' },
+    '选择 .md / .txt（≤64KB），内容会填入下方文本框（覆盖当前编辑内容），保存前可继续检查与编辑。');
+  loadFileInput.addEventListener('change', async () => {
+    const file = loadFileInput.files?.[0];
+    if (!file) return;
+    const fileError = skillFileError(file, '载入文件');
+    if (fileError) {
+      showToast(fileError, 'error');
+      loadFileInput.value = '';
+      return;
+    }
+    try {
+      const text = await readTextFile(file);
+      if (!text.trim()) {
+        showToast('文件内容为空，无法载入。', 'error');
+        return;
+      }
+      textarea.value = text;
+      textarea.scrollTop = 0;
+      textarea.focus();
+      loadFileHint.textContent = `已从“${file.name}”载入 ${Array.from(text).length} 字，请检查后保存。`;
+    } catch (err) {
+      showToast(err?.message || '读取文件失败。', 'error');
+    } finally {
+      loadFileInput.value = '';
+    }
+  });
+
   const formatHint = h('div', { class: 'skill-format-hint' },
     h('span', {}, '格式：元数据行 + 空行 + 引导正文。'),
     h('span', { class: 'muted' }, '工具仅支持 knowledge_search 或 工具名@服务器名（须先连接 MCP）。'),
@@ -2269,6 +3121,11 @@ function openSkillEditor(skill) {
 
   const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
   const form = h('form', { id: 'skill-form', class: 'dialog-form' },
+    h('div', { class: 'field' },
+      h('label', { for: 'skill-load-file' }, '从文件载入内容'),
+      loadFileInput,
+      loadFileHint,
+    ),
     h('div', { class: 'field' },
       h('div', { class: 'field-label-row' },
         h('label', { for: 'skill-source' }, '完整技能文件（source_text）'),
@@ -2347,6 +3204,39 @@ async function deleteSkill(skill) {
     await loadSkillsView();
   } catch (error) {
     showToast(error?.message || '删除技能失败。', 'error');
+  }
+}
+
+async function uploadSkillFile(input, button) {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  const fileError = skillFileError(file);
+  if (fileError) {
+    showToast(fileError, 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  setBusy(button, true);
+  try {
+    const created = await api('/skills/upload', { method: 'POST', body: formData });
+    state.highlightSkillId = created?.id ?? null;
+    showToast(`技能“${created?.name || file.name}”已上传。`, 'success');
+    await loadSkillsView();
+    if (state.highlightSkillId != null) {
+      setTimeout(() => {
+        document.querySelectorAll('.skill-card.is-highlighted').forEach((node) => {
+          node.classList.remove('is-highlighted');
+        });
+        state.highlightSkillId = null;
+      }, 4200);
+    }
+  } catch (error) {
+    if (error?.status !== 401) showToast(error?.message || '上传技能文件失败。', 'error');
+  } finally {
+    setBusy(button, false);
   }
 }
 

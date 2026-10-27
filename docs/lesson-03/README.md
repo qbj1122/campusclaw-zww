@@ -75,4 +75,4 @@ SELECT username,role,class_id,LEFT(password_hash,4) FROM users;
 
 ## 自动化验证
 
-`apitest/run_all.py` 在 2026-10-27 全量运行：35 个用例通过，0 失败；报告写入 `apitest/report.html`（不入库）。
+`apitest/run_all.py` 在 2026-10-27 全量运行：55 个用例通过，0 失败；报告写入 `apitest/report.html`（不入库）。

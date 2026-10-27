@@ -46,6 +46,9 @@ func Migrate(ctx context.Context, db *sql.DB, log *slog.Logger) error {
 			return fmt.Errorf("migrate: %w\nstatement: %s", err, stmt)
 		}
 	}
+	if err := ensureColumns(ctx, db); err != nil {
+		return err
+	}
 	// ngram parser is MySQL 8 specific. If the local server lacks it we still
 	// create a plain FULLTEXT index; keyword search also has a LIKE fallback.
 	if _, err := db.ExecContext(ctx, `CREATE FULLTEXT INDEX ft_chunk_text ON knowledge_chunks(chunk_text) WITH PARSER ngram`); err != nil {
@@ -149,6 +152,43 @@ var schema = []string{
 		CONSTRAINT fk_index_state_entry FOREIGN KEY (knowledge_entry_id) REFERENCES knowledge_entries(id) ON DELETE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+	`CREATE TABLE IF NOT EXISTS prompt_templates (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		class_id BIGINT NOT NULL,
+		name VARCHAR(64) NOT NULL,
+		description VARCHAR(255) NOT NULL DEFAULT '',
+		content TEXT NOT NULL,
+		seed_key VARCHAR(64) NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_templates_class_name (class_id, name),
+		UNIQUE KEY uk_templates_seed (seed_key),
+		KEY idx_templates_class (class_id),
+		CONSTRAINT fk_templates_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+	`CREATE TABLE IF NOT EXISTS ai_apps (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		class_id BIGINT NOT NULL,
+		name VARCHAR(64) NOT NULL,
+		description VARCHAR(255) NOT NULL DEFAULT '',
+		category VARCHAR(32) NOT NULL DEFAULT '通用',
+		icon VARCHAR(16) NOT NULL DEFAULT '✨',
+		prompt_template_id BIGINT NULL,
+		default_prompt TEXT NOT NULL,
+		default_skill_ids_json VARCHAR(1000) NOT NULL DEFAULT '[]',
+		default_material_ids_json VARCHAR(1000) NOT NULL DEFAULT '[]',
+		enabled TINYINT(1) NOT NULL DEFAULT 1,
+		seed_key VARCHAR(64) NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_apps_class_name (class_id, name),
+		UNIQUE KEY uk_apps_seed (seed_key),
+		KEY idx_apps_class (class_id),
+		CONSTRAINT fk_apps_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+		CONSTRAINT fk_apps_template FOREIGN KEY (prompt_template_id) REFERENCES prompt_templates(id) ON DELETE SET NULL
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 	`CREATE TABLE IF NOT EXISTS skills (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
 		class_id BIGINT NOT NULL,
@@ -173,12 +213,18 @@ var schema = []string{
 		class_id BIGINT NOT NULL,
 		name VARCHAR(64) NOT NULL,
 		prompt TEXT NOT NULL,
+		prompt_template_id BIGINT NULL,
+		app_id BIGINT NULL,
 		enabled TINYINT(1) NOT NULL DEFAULT 1,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 		UNIQUE KEY uk_agents_class_name (class_id, name),
 		KEY idx_agents_class (class_id),
-		CONSTRAINT fk_agents_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
+		KEY idx_agents_template (prompt_template_id),
+		KEY idx_agents_app (app_id),
+		CONSTRAINT fk_agents_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+		CONSTRAINT fk_agents_template FOREIGN KEY (prompt_template_id) REFERENCES prompt_templates(id) ON DELETE SET NULL,
+		CONSTRAINT fk_agents_app FOREIGN KEY (app_id) REFERENCES ai_apps(id) ON DELETE SET NULL
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 	`CREATE TABLE IF NOT EXISTS agent_skills (
@@ -291,4 +337,44 @@ var schema = []string{
 		KEY idx_assignments_class (class_id),
 		CONSTRAINT fk_assignments_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+}
+
+func ensureColumns(ctx context.Context, db *sql.DB) error {
+	cols := []struct {
+		table, column, ddl string
+	}{
+		{"agents", "prompt_template_id", "BIGINT NULL AFTER prompt"},
+		{"agents", "app_id", "BIGINT NULL AFTER prompt_template_id"},
+	}
+	for _, c := range cols {
+		var n int
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?`, c.table, c.column).Scan(&n)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE `"+c.table+"` ADD COLUMN `"+c.column+"` "+c.ddl); err != nil {
+				return fmt.Errorf("add column %s.%s: %w", c.table, c.column, err)
+			}
+		}
+	}
+	fks := []struct{ table, name, ddl string }{
+		{"agents", "fk_agents_template", "ALTER TABLE agents ADD CONSTRAINT fk_agents_template FOREIGN KEY (prompt_template_id) REFERENCES prompt_templates(id) ON DELETE SET NULL"},
+		{"agents", "fk_agents_app", "ALTER TABLE agents ADD CONSTRAINT fk_agents_app FOREIGN KEY (app_id) REFERENCES ai_apps(id) ON DELETE SET NULL"},
+	}
+	for _, fk := range fks {
+		var n int
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+			WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME=? AND CONSTRAINT_NAME=?`, fk.table, fk.name).Scan(&n)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.ExecContext(ctx, fk.ddl); err != nil {
+				return fmt.Errorf("add foreign key %s: %w", fk.name, err)
+			}
+		}
+	}
+	return nil
 }

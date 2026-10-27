@@ -179,6 +179,8 @@ class Ctx:
             "skill": {},
             "material": {},
             "server": {},
+            "template": {},
+            "app": {},
         }
 
     # -- assertions ---------------------------------------------------------
@@ -501,11 +503,97 @@ class Ctx:
             self.track("skill", payload["id"], payload)
         return payload
 
+    def upload_skill(
+        self,
+        source_text: str,
+        *,
+        filename: str | None = None,
+        user: str = "teacher_a",
+        expect: int = 201,
+        track: bool = True,
+    ) -> dict[str, Any]:
+        """Upload a skill file through ``/api/skills/upload`` or its PUT sibling."""
+
+        filename = filename or f"{self.unique('skill-file')}.md"
+        mime_type = "text/markdown" if filename.lower().endswith(".md") else "text/plain"
+        response = self.post(
+            "/api/skills/upload",
+            user=user,
+            expect=expect,
+            files={"file": (filename, source_text.encode("utf-8"), mime_type)},
+        )
+        if expect != 201:
+            return {}
+        payload = self.json(response)
+        if track and isinstance(payload.get("id"), int):
+            self.track("skill", payload["id"], payload)
+        return payload
+
+    def create_prompt_template(
+        self,
+        name: str,
+        content: str,
+        *,
+        description: str = "",
+        user: str = "teacher_a",
+        expect: int = 201,
+        track: bool = True,
+    ) -> dict[str, Any]:
+        response = self.post(
+            "/api/prompt-templates",
+            user=user,
+            expect=expect,
+            json={"name": name, "description": description, "content": content},
+        )
+        if expect != 201:
+            return {}
+        payload = self.json(response)
+        if track and isinstance(payload.get("id"), int):
+            self.track("template", payload["id"], payload)
+        return payload
+
+    def create_app(
+        self,
+        name: str,
+        *,
+        description: str = "自动化测试应用",
+        category: str = "通用",
+        icon: str = "✨",
+        prompt_template_id: int | None = None,
+        default_prompt: str = "你是应用默认智能体，请依据本班材料回答。",
+        skill_ids: list[int] | None = None,
+        material_ids: list[int] | None = None,
+        enabled: bool = True,
+        user: str = "teacher_a",
+        expect: int = 201,
+        track: bool = True,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "category": category,
+            "icon": icon,
+            "default_prompt": default_prompt,
+            "skill_ids": skill_ids or [],
+            "material_ids": material_ids or [],
+            "enabled": enabled,
+        }
+        if prompt_template_id is not None:
+            body["prompt_template_id"] = prompt_template_id
+        response = self.post("/api/apps", user=user, expect=expect, json=body)
+        if expect != 201:
+            return {}
+        payload = self.json(response)
+        if track and isinstance(payload.get("id"), int):
+            self.track("app", payload["id"], payload)
+        return payload
+
     def create_agent(
         self,
         name: str,
         *,
         prompt: str = "你是自动化测试智能体，依据本班材料回答。",
+        prompt_template_id: int | None = None,
         enabled: bool = True,
         skill_ids: list[int] | None = None,
         material_ids: list[int] | None = None,
@@ -513,17 +601,20 @@ class Ctx:
         expect: int = 201,
         track: bool = True,
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "name": name,
+            "prompt": prompt,
+            "enabled": enabled,
+            "skill_ids": skill_ids or [],
+            "material_ids": material_ids or [],
+        }
+        if prompt_template_id is not None:
+            body["prompt_template_id"] = prompt_template_id
         response = self.post(
             "/api/agents",
             user=user,
             expect=expect,
-            json={
-                "name": name,
-                "prompt": prompt,
-                "enabled": enabled,
-                "skill_ids": skill_ids or [],
-                "material_ids": material_ids or [],
-            },
+            json=body,
         )
         if expect != 201:
             return {}
@@ -718,6 +809,14 @@ class Ctx:
         self.execute("DELETE FROM skills WHERE id=%s", (skill_id,))
         self.untrack("skill", skill_id)
 
+    def remove_prompt_template(self, template_id: int) -> None:
+        self.execute("DELETE FROM prompt_templates WHERE id=%s", (template_id,))
+        self.untrack("template", template_id)
+
+    def remove_app(self, app_id: int) -> None:
+        self.execute("DELETE FROM ai_apps WHERE id=%s", (app_id,))
+        self.untrack("app", app_id)
+
     def remove_server(self, server_id: int) -> None:
         # Test cleanup only: real product deletions are exercised through the API.
         self.execute("DELETE FROM mcp_tool_calls WHERE server_id=%s", (server_id,))
@@ -747,6 +846,16 @@ class Ctx:
                 self.remove_material(material_id)
             except Exception as exc:  # pragma: no cover - best effort
                 errors.append(f"material {material_id}: {exc}")
+        for app_id in list(self._tracked["app"]):
+            try:
+                self.remove_app(app_id)
+            except Exception as exc:  # pragma: no cover - best effort
+                errors.append(f"app {app_id}: {exc}")
+        for template_id in list(self._tracked["template"]):
+            try:
+                self.remove_prompt_template(template_id)
+            except Exception as exc:  # pragma: no cover - best effort
+                errors.append(f"template {template_id}: {exc}")
         for server_id in list(self._tracked["server"]):
             try:
                 self.remove_server(server_id)

@@ -122,3 +122,32 @@ func TestTopicalOverlapGate(t *testing.T) {
 		t.Fatal("CJK detection wrong")
 	}
 }
+
+func TestPromptTemplateVarsAndRender(t *testing.T) {
+	content := "你是{{class_name}}的{{agent_name}}，材料：{{materials}}，日期{{date}}。"
+	vars, err := PromptTemplateVars(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vars) != 4 {
+		t.Fatalf("unexpected vars: %v", vars)
+	}
+	rendered := RenderPromptTemplate(content, map[string]string{
+		"class_name": "班级A", "agent_name": "数学助手", "materials": "数学笔记", "date": "2026-10-27",
+	})
+	if strings.Contains(rendered, "{{") || !strings.Contains(rendered, "班级A") {
+		t.Fatalf("render failed: %s", rendered)
+	}
+	if _, err := PromptTemplateVars("你好 {{question}}"); err == nil {
+		t.Fatal("question should not be an allowed template variable")
+	}
+	if _, err := PromptTemplateVars("坏写法 {{ class-name }}"); err == nil {
+		t.Fatal("unknown variable should fail")
+	}
+	if _, err := ValidatePromptTemplate("", "", "正文"); err == nil {
+		t.Fatal("empty name should fail")
+	}
+	if _, err := ValidatePromptTemplate("模板", "", ""); err == nil {
+		t.Fatal("empty content should fail")
+	}
+}

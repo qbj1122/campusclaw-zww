@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/qbj1122/campusclaw-zww/internal/config"
@@ -129,7 +130,8 @@ func (a *Assistant) Chat(ctx context.Context, user *model.User, convID int64, qu
 		history = history[len(history)-6:]
 	}
 
-	messages := a.composeMessages(agent, selected, question, citations, evidence, toolTexts, history)
+	prompt := a.resolvePrompt(ctx, user, agent, selected, materials)
+	messages := a.composeMessages(prompt, selected, question, citations, evidence, toolTexts, history)
 	meta := Meta{Status: "ok", Citations: citations, ToolCalls: toolCalls}
 	if selected != nil {
 		meta.Skill = &SkillMeta{Name: selected.Name}
@@ -179,11 +181,41 @@ func BuildEvidence(hits []model.Hit, contents map[int64]string) ([]model.Citatio
 	return citations, evidence
 }
 
-func (a *Assistant) composeMessages(agent *model.Agent, sk *model.Skill, question string, citations []model.Citation, evidence, toolTexts []string, history []model.Message) []llm.Message {
-	prompt := strings.TrimSpace(agent.Prompt)
-	if prompt == "" {
-		prompt = "你是本班的学科助手。依据教师提供的材料与技能说明回答，不编造出处。"
+func (a *Assistant) resolvePrompt(ctx context.Context, u *model.User, agent *model.Agent, sk *model.Skill, materials []model.Material) string {
+	if agent.PromptTemplateID != nil {
+		tpl, err := a.Store.PromptTemplate(ctx, u.ClassID, *agent.PromptTemplateID)
+		if err != nil {
+			a.Log.Warn("prompt template unavailable, falling back to agent prompt", "agent_id", agent.ID, "error", err.Error())
+		} else {
+			skillName, subject := "", ""
+			if sk != nil {
+				skillName, subject = sk.Name, sk.SubjectText
+			}
+			titles := make([]string, 0, len(materials))
+			for _, m := range materials {
+				titles = append(titles, m.Title)
+			}
+			student := u.DisplayName
+			if strings.TrimSpace(student) == "" {
+				student = u.Username
+			}
+			rendered := strings.TrimSpace(RenderPromptTemplate(tpl.Content, map[string]string{
+				"class_name": u.ClassName, "agent_name": agent.Name, "student_name": student,
+				"skill_name": skillName, "subject": subject, "date": time.Now().Format("2006-01-02"),
+				"materials": strings.Join(titles, "、"),
+			}))
+			if rendered != "" {
+				return rendered
+			}
+		}
 	}
+	if p := strings.TrimSpace(agent.Prompt); p != "" {
+		return p
+	}
+	return "你是本班的学科助手。依据教师提供的材料与技能说明回答，不编造出处。"
+}
+
+func (a *Assistant) composeMessages(prompt string, sk *model.Skill, question string, citations []model.Citation, evidence, toolTexts []string, history []model.Message) []llm.Message {
 	var sys strings.Builder
 	sys.WriteString(prompt)
 	sys.WriteString("\n\n")
