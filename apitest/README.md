@@ -36,6 +36,9 @@ def run(ctx):
 
 ## Run
 
+Dependencies: `python3 -m pip install -r apitest/requirements.txt`
+(`requests` and `PyMySQL`).
+
 ```bash
 python3 apitest/run_all.py
 python3 apitest/run_all.py --filter materials
@@ -103,9 +106,9 @@ case owns its fixture so ordering and partial failures cannot cascade.
 While building the suite, three contract divergences were observed in the
 running build and were fixed outside this suite (no Go changes were made here):
 
-1. `DELETE /api/skills/{id}` and `DELETE /api/agents/{id}` from another class
-   returned 204 instead of the documented 404.
-2. `PUT /api/mcp/servers/{id}` disconnected the server but kept cached tools
+1. `DELETE /api/skills/{id}` from another class returned 204 instead of 404.
+2. `DELETE /api/agents/{id}` from another class returned 204 instead of 404.
+3. `PUT /api/mcp/servers/{id}` disconnected the server but kept cached tools
    (`tool_count` stayed 2) instead of clearing the cache.
 
 The current cases assert the documented behaviour (404, `tool_count == 0`), so
