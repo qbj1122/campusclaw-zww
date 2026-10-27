@@ -212,6 +212,9 @@ func (a *Assistant) resolvePrompt(ctx context.Context, u *model.User, agent *mod
 	if p := strings.TrimSpace(agent.Prompt); p != "" {
 		return p
 	}
+	if p, err := a.Store.ClassPrompt(ctx, u.ClassID); err == nil && strings.TrimSpace(p) != "" {
+		return p
+	}
 	return "你是本班的学科助手。依据教师提供的材料与技能说明回答，不编造出处。"
 }
 
