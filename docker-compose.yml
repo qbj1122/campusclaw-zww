@@ -25,6 +25,22 @@ services:
       - qdrant-data:/qdrant/storage
     restart: unless-stopped
 
+  mcp-demo:
+    build:
+      context: .
+      dockerfile: mcp-server/Dockerfile
+    environment:
+      MCP_PORT: 8090
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -41,6 +57,8 @@ services:
       db:
         condition: service_healthy
       qdrant:
+        condition: service_started
+      mcp-demo:
         condition: service_started
     expose:
       - "8080"
