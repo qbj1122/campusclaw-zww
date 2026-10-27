@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CampusClaw OpenAPI 接口文档" />
+  <title>CampusClaw · API 文档</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    :root {
+      --red: #94070a;
+      --ink: #241f1c;
+      --muted: #8a8078;
+      --bg: #f6f3ee;
+      --line: #e9e2d7;
+      --font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+        "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+    }
+
+    .docs-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 16px clamp(16px, 4vw, 44px);
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .docs-brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .docs-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(145deg, #a50a0e, #740508);
+      color: #fff;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .docs-title {
+      display: block;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .docs-sub {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .docs-links {
+      display: flex;
+      gap: 16px;
+      font-size: 12.5px;
+    }
+
+    .docs-links a {
+      color: var(--red);
+      text-decoration: none;
+    }
+
+    .docs-links a:hover { text-decoration: underline; }
+
+    .docs-note {
+      max-width: 1460px;
+      margin: 0 auto;
+      padding: 18px clamp(16px, 4vw, 44px) 0;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.7;
+    }
+
+    #swagger-ui {
+      max-width: 1460px;
+      margin: 0 auto;
+      padding: 12px clamp(10px, 4vw, 34px) 48px;
+    }
+
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui .info .title { color: var(--ink); }
+    .swagger-ui .btn.authorize { border-color: var(--red); color: var(--red); }
+    .swagger-ui .btn.authorize svg { fill: var(--red); }
+    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #2c5c8f; }
+    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: var(--red); }
+    .swagger-ui .opblock.opblock-put .opblock-summary-method { background: #8a5a12; }
+    .swagger-ui .opblock.opblock-delete .opblock-summary-method { background: #5c0306; }
+
+    .fallback {
+      max-width: 720px;
+      margin: 28px auto;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.75;
+      text-align: center;
+    }
+
+    .fallback a { color: var(--red); }
+  </style>
+</head>
+<body>
+  <header class="docs-head">
+    <a class="docs-brand" href="/">
+      <span class="docs-mark" aria-hidden="true">C</span>
+      <span>
+        <span class="docs-title">CampusClaw API</span>
+        <span class="docs-sub">OpenAPI 接口文档 · 可在线试调</span>
+      </span>
+    </a>
+    <nav class="docs-links" aria-label="文档链接">
+      <a href="/">返回应用</a>
+      <a href="/openapi.json">openapi.json</a>
+    </nav>
+  </header>
+
+  <p class="docs-note">
+    所有业务接口需使用 <code>Authorization: Bearer &lt;JWT&gt;</code>。可先调用
+    <code>POST /api/login</code> 获取令牌，再点击 Swagger UI 右上角「Authorize」填入令牌试用。
+  </p>
+
+  <div id="swagger-ui"></div>
+
+  <noscript>
+    <p class="fallback">当前浏览器未启用 JavaScript，无法显示 Swagger UI。请直接访问
+      <a href="/openapi.json">/openapi.json</a> 查看接口定义。</p>
+  </noscript>
+
+  <p class="fallback">
+    Swagger UI 需要从 CDN 加载资源。若页面未能正常渲染，请直接访问
+    <a href="/openapi.json">/openapi.json</a> 查看 OpenAPI 定义。
+  </p>
+
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    (function () {
+      function mount() {
+        var host = document.getElementById('swagger-ui');
+        if (!host) return;
+        if (!window.SwaggerUIBundle) {
+          host.replaceChildren();
+          var notice = document.createElement('p');
+          notice.className = 'fallback';
+          notice.textContent = 'Swagger UI 资源加载失败，请检查网络，或直接访问 /openapi.json。';
+          host.appendChild(notice);
+          return;
+        }
+        try {
+          window.SwaggerUIBundle({
+            url: '/openapi.json',
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            persistAuthorization: true,
+            displayRequestDuration: true,
+            tryItOutEnabled: true,
+            validatorUrl: null
+          });
+        } catch (error) {
+          var fallback = document.createElement('p');
+          fallback.className = 'fallback';
+          fallback.textContent = 'Swagger UI 初始化失败，请直接访问 /openapi.json 查看接口定义。';
+          host.appendChild(fallback);
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mount);
+      } else {
+        mount();
+      }
+    })();
+  </script>
+</body>
+</html>
